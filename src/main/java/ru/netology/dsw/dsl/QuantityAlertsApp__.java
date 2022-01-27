@@ -22,11 +22,10 @@ import java.util.concurrent.CountDownLatch;
  * Приложение на Kafka Streams, которое юудет писать в топик сообщение,
  * каждый раз, когда покупок продукта за минуту было больше, чем MAX_PURCHASES_PER_MINUTE
  */
-public class QuantityAlertsApp {
+public class QuantityAlertsApp__ {
     public static final String PURCHASE_TOPIC_NAME = "purchases";
-    public static final String PRODUCT_TOPIC_NAME = "products";
     public static final String RESULT_TOPIC = "product_quantity_alerts-dsl";
-    private static final long MAX_PURCHASES_PER_MINUTE = 3000L;
+    private static final long MAX_PURCHASES_PER_MINUTE = 10L;
 
     public static void main(String[] args) throws InterruptedException {
         // создаем клиент для общения со schema-registry
@@ -90,20 +89,9 @@ public class QuantityAlertsApp {
                 PURCHASE_TOPIC_NAME, // указываем имя топика
                 Consumed.with(new Serdes.StringSerde(), avroSerde) // указываем тип ключа и тип значения в топике
         );
-        // Table - хранит в себе последнюю запись из топика по ключу
-        var productsTable = builder.globalTable(
-                PRODUCT_TOPIC_NAME, // указываем топик, который мы хотим выкачать в таблицу
-                Consumed.with(new Serdes.StringSerde(), avroSerde) // указываем тип ключа и тип значения в топике
-        );
-
-        var purchaseWithJoinedProduct = purchasesStream.leftJoin(
-                productsTable, // указываем, какую табличку приджоинить
-                (key, val) -> val.get("productid").toString())
-                .filter((key, val) -> val.success)
-                ;
 
         Duration oneMinute = Duration.ofMinutes(1);
-        purchaseWithJoinedProduct.groupBy((key, val) -> val.get("productid").toString(), Grouped.with(new Serdes.StringSerde(), avroSerde))
+        purchasesStream.groupBy((key, val) -> val.get("productid").toString(), Grouped.with(new Serdes.StringSerde(), avroSerde))
                 .windowedBy(
                         // объединяем записи в рамках минуты
                         TimeWindows.of(oneMinute)
@@ -111,7 +99,7 @@ public class QuantityAlertsApp {
                                 .advanceBy(oneMinute))
                 .aggregate(
                         () -> 0L,
-                        (key, val, agg) -> agg += (Long) val.get("quantity") * (Long) val.get("price"),
+                        (key, val, agg) -> agg += (Long) val.get("quantity"),
                         Materialized.with(new Serdes.StringSerde(), new Serdes.LongSerde())
                 )
                 .filter((key, val) -> val > MAX_PURCHASES_PER_MINUTE)
@@ -137,8 +125,4 @@ public class QuantityAlertsApp {
 
         return builder.build();
     }
-
-
-
 }
-
