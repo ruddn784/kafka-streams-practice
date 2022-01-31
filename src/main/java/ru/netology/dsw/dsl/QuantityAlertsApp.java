@@ -25,8 +25,10 @@ import java.util.concurrent.CountDownLatch;
 public class QuantityAlertsApp {
     public static final String PURCHASE_TOPIC_NAME = "purchases";
     public static final String PRODUCT_TOPIC_NAME = "products";
+    public static final String JOINED_TOPIC = "JoinedTopic";
     public static final String RESULT_TOPIC = "product_quantity_alerts-dsl";
-    private static final long MAX_PURCHASES_PER_MINUTE = 3000L;
+
+    private static final long MAX_PURCHASES_PER_MINUTE = 10L;
 
     public static void main(String[] args) throws InterruptedException {
         // создаем клиент для общения со schema-registry
@@ -96,14 +98,27 @@ public class QuantityAlertsApp {
                 Consumed.with(new Serdes.StringSerde(), avroSerde) // указываем тип ключа и тип значения в топике
         );
 
-        var purchaseWithJoinedProduct = purchasesStream.leftJoin(
+        var purchasesStreamJoined = builder.stream(
+                //var purchaseWithJoinedProduct = builder.stream(
+                JOINED_TOPIC, // указываем имя топика
+                Consumed.with(new Serdes.StringSerde(), avroSerde) // указываем тип ключа и тип значения в топике
+        );
+
+        var JoinedTopic =  purchasesStream.leftJoin(
                 productsTable, // указываем, какую табличку приджоинить
-                (key, val) -> val.get("productid").toString())
+                (key, val) -> val.get("productid").toString(), // указываем, как получить ключ, по которому джоиним
+                QuantityAlertsApp::joinProduct // указываем, как джоинить
+        );
+        JoinedTopic
+                // фильтруем только успешные записи
                 .filter((key, val) -> val.success)
-                ;
+                // используем именно метод mapValues, потому что он не может вызвать репартиционирования (см 2-ю лекцию)
+                .mapValues(val -> val.result)
+                // записываем успешные сообщения в результирующий топик
+                .to(JOINED_TOPIC, Produced.with(new Serdes.StringSerde(), avroSerde));
 
         Duration oneMinute = Duration.ofMinutes(1);
-        purchaseWithJoinedProduct.groupBy((key, val) -> val.get("productid").toString(), Grouped.with(new Serdes.StringSerde(), avroSerde))
+        purchasesStreamJoined.groupBy((key, val) -> val.get("product_id").toString(), Grouped.with(new Serdes.StringSerde(), avroSerde))
                 .windowedBy(
                         // объединяем записи в рамках минуты
                         TimeWindows.of(oneMinute)
@@ -111,7 +126,7 @@ public class QuantityAlertsApp {
                                 .advanceBy(oneMinute))
                 .aggregate(
                         () -> 0L,
-                        (key, val, agg) -> agg += (Long) val.get("quantity") * (Long) val.get("price"),
+                        (key, val, agg) -> agg += (Long) val.get("quantity") ,//* (Long) val.get("price"),
                         Materialized.with(new Serdes.StringSerde(), new Serdes.LongSerde())
                 )
                 .filter((key, val) -> val > MAX_PURCHASES_PER_MINUTE)
@@ -137,7 +152,31 @@ public class QuantityAlertsApp {
 
         return builder.build();
     }
+    private static QuantityAlertsApp.JoinResult joinProduct(GenericRecord purchase, GenericRecord product) {
+        try {
+            // описываем схему нашего сообщения
+            Schema schema = SchemaBuilder.record("PurchaseWithProduct").fields()
+                    .requiredLong("purchase_id")
+                    .requiredLong("purchase_quantity")
+                    .requiredLong("product_id")
+                    .requiredString("product_name")
+                    .requiredDouble("product_price")
+                    .endRecord();
+            GenericRecord result = new GenericData.Record(schema);
+            // копируем в наше сообщение нужные поля из сообщения о покупке
+            result.put("purchase_id", purchase.get("id").toString());
+            result.put("purchase_quantity", purchase.get("quantity"));
+            result.put("product_id", purchase.get("productid"));
+            // копируем в наше сообщение нужные поля из сообщения о товаре
+            result.put("product_name", product.get("name"));
+            result.put("product_price", product.get("price"));
+            return new QuantityAlertsApp.JoinResult(true, result, null);
+        } catch (Exception e) {
+            return new QuantityAlertsApp.JoinResult(false, purchase, e.getMessage());
+        }
+    }
 
+    private static record JoinResult(boolean success, GenericRecord result, String errorMessage){}
 
 
 }
