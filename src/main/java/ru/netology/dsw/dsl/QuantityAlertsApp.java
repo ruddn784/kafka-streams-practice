@@ -25,10 +25,10 @@ import java.util.concurrent.CountDownLatch;
 public class QuantityAlertsApp {
     public static final String PURCHASE_TOPIC_NAME = "purchases";
     public static final String PRODUCT_TOPIC_NAME = "products";
-    public static final String JOINED_TOPIC = "JoinedTopic";
+    // public static final String JOINED_TOPIC = "JoinedTopic";
     public static final String RESULT_TOPIC = "product_quantity_alerts-dsl";
 
-    private static final long MAX_PURCHASES_PER_MINUTE = 10L;
+    private static final Long MAX_PURCHASES_PER_MINUTE = 10L;
 
     public static void main(String[] args) throws InterruptedException {
         // создаем клиент для общения со schema-registry
@@ -98,36 +98,34 @@ public class QuantityAlertsApp {
                 Consumed.with(new Serdes.StringSerde(), avroSerde) // указываем тип ключа и тип значения в топике
         );
 
-        var purchasesStreamJoined = builder.stream(
-                //var purchaseWithJoinedProduct = builder.stream(
-                JOINED_TOPIC, // указываем имя топика
-                Consumed.with(new Serdes.StringSerde(), avroSerde) // указываем тип ключа и тип значения в топике
-        );
+//        var purchasesStreamJoined = builder.stream(
+//                //var purchaseWithJoinedProduct = builder.stream(
+//                JOINED_TOPIC, // указываем имя топика
+//                Consumed.with(new Serdes.StringSerde(), avroSerde) // указываем тип ключа и тип значения в топике
+//        );
 
-        var JoinedTopic =  purchasesStream.leftJoin(
+        var joinedTopic =  purchasesStream.leftJoin(
                 productsTable, // указываем, какую табличку приджоинить
                 (key, val) -> val.get("productid").toString(), // указываем, как получить ключ, по которому джоиним
                 QuantityAlertsApp::joinProduct // указываем, как джоинить
-        );
-        JoinedTopic
-                // фильтруем только успешные записи
+        )
                 .filter((key, val) -> val.success)
                 // используем именно метод mapValues, потому что он не может вызвать репартиционирования (см 2-ю лекцию)
-                .mapValues(val -> val.result)
-                // записываем успешные сообщения в результирующий топик
-                .to(JOINED_TOPIC, Produced.with(new Serdes.StringSerde(), avroSerde));
+                .mapValues(val -> val.result);
+
+
 
         Duration oneMinute = Duration.ofMinutes(1);
-        purchasesStreamJoined.groupBy((key, val) -> val.get("product_id").toString(), Grouped.with(new Serdes.StringSerde(), avroSerde))
-                .windowedBy(
+        joinedTopic.groupBy((key, val) -> val.get("product_id").toString(), Grouped.with(new Serdes.StringSerde(), avroSerde))
+                      .windowedBy(
                         // объединяем записи в рамках минуты
                         TimeWindows.of(oneMinute)
                                 // сдвигаем окно всегда на минуту
                                 .advanceBy(oneMinute))
                 .aggregate(
-                        () -> 0L,
-                        (key, val, agg) -> agg += (Long) val.get("quantity") ,//* (Long) val.get("price"),
-                        Materialized.with(new Serdes.StringSerde(), new Serdes.LongSerde())
+                        () -> 0D,
+                        (key, val, agg) -> agg += (Long) val.get("purchase_quantity") *  (Double) val.get("product_price"),
+                        Materialized.with(new Serdes.StringSerde(), new Serdes.DoubleSerde())
                 )
                 .filter((key, val) -> val > MAX_PURCHASES_PER_MINUTE)
                 .toStream()
@@ -156,6 +154,8 @@ public class QuantityAlertsApp {
         try {
             // описываем схему нашего сообщения
             Schema schema = SchemaBuilder.record("PurchaseWithProduct").fields()
+
+                   // .requiredString("purchase_id")
                     .requiredLong("purchase_id")
                     .requiredLong("purchase_quantity")
                     .requiredLong("product_id")
