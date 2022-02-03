@@ -20,7 +20,7 @@ import java.util.concurrent.CountDownLatch;
 
 /**
  * Приложение на Kafka Streams, которое юудет писать в топик сообщение,
- * каждый раз, когда покупок продукта за минуту было больше, чем MAX_PURCHASES_PER_MINUTE
+ * каждый раз, когда сумма покупок продукта за минуту будет больше, чем MAX_PURCHASES_PER_MINUTE
  */
 public class QuantityAlertsApp {
     public static final String PURCHASE_TOPIC_NAME = "purchases";
