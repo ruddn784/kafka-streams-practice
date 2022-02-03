@@ -28,7 +28,7 @@ public class QuantityAlertsApp {
     // public static final String JOINED_TOPIC = "JoinedTopic";
     public static final String RESULT_TOPIC = "product_quantity_alerts-dsl";
 
-    private static final Long MAX_PURCHASES_PER_MINUTE = 10L;
+    private static final Long MAX_PURCHASES_PER_MINUTE = 3000L;
 
     public static void main(String[] args) throws InterruptedException {
         // создаем клиент для общения со schema-registry
@@ -164,7 +164,8 @@ public class QuantityAlertsApp {
                     .endRecord();
             GenericRecord result = new GenericData.Record(schema);
             // копируем в наше сообщение нужные поля из сообщения о покупке
-            result.put("purchase_id", purchase.get("id").toString());
+            //  result.put("purchase_id", purchase.get("id").toString());
+            result.put("purchase_id", purchase.get("id"));
             result.put("purchase_quantity", purchase.get("quantity"));
             result.put("product_id", purchase.get("productid"));
             // копируем в наше сообщение нужные поля из сообщения о товаре
